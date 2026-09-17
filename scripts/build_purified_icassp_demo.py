@@ -195,7 +195,7 @@ methods_config = [
         'key': 'knnvc_k4',
         'file': 'converted_knnvc_k4.wav',
         'name': 'kNN-VC (k=4)',
-        'badge': 'IEEE TASLP 2023',
+        'badge': 'Interspeech 2023',
         'highlight': False,
         'color': 'primary',
     },

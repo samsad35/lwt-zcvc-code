@@ -121,7 +121,7 @@ Evaluated across 10 unseen target speakers, 20 source utterances from 10 distinc
 | **Local Wasserstein (LWT - Ours)** | Locally Adaptive Wasserstein | 0.58% | 2.38% | 1.64% | 0.720 | **4.38** | 0.922 | 0.0239 |
 | **Soft Local WCT (Ours)** | Locally Adaptive Statistical | **0.54% ★** | **2.28% ★** | **1.62% ★** | 0.631 | 4.36 | **0.925 ★** | 0.0067 |
 | **LinearVC** *(Interspeech 2025)* | Global Linear Projection | 0.67% | 2.82% | 1.70% | 0.707 | 4.37 | 0.913 | **0.00002 ★** |
-| **kNN-VC ($k=4$)** *(IEEE TASLP 2023)* | Local Instance Averaging | 1.11% | 4.00% | 1.81% | 0.743 | **4.38** | 0.920 | 0.0002 |
+| **kNN-VC ($k=4$)** *(Interspeech 2023)* | Local Instance Averaging | 1.11% | 4.00% | 1.81% | 0.743 | **4.38** | 0.920 | 0.0002 |
 | **Classic WCT** | Global Gaussian Matching | 1.00% | 3.23% | 1.61% | 0.648 | 4.35 | 0.906 | 0.0009 |
 
 ---
