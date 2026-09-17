@@ -16,43 +16,12 @@
 
 ---
 
-## 🌟 Overview
-
-**Boosted Local Wasserstein Transport (Boosted LWT)** is a closed-form, non-iterative mathematical framework for zero-shot voice conversion and analytical speech disentanglement operating in self-supervised feature spaces (WavLM-Large).
-
-### Why Boosted LWT?
-Traditional voice conversion methods face a fundamental trade-off:
-- **Nearest-Neighbor Frame Replacement (e.g. kNN-VC)** achieves high speaker similarity but causes discontinuous concatenation artifacts, frame-boundary jitter, and elevated Character Error Rates (**CER 1.11%**).
-- **Standard Transport / Global Gaussian Matching (WCT / LWT $\alpha=1.0$)** guarantees perfectly smooth phonetic trajectories (**CER 0.58%**), but suffers from *centroid collapse* towards the center of distribution, resulting in diluted target speaker individuality and intermittent volume drops.
-
-**Boosted LWT ($\alpha=1.5$)** introduces an analytical **Speaker Covariance Boost**:
-$$\Sigma_{Y,k}^{\text{boosted}} = \Sigma_{\text{shared},k} + \alpha (\Sigma_{Y,k} - \Sigma_{\text{shared},k})$$
-Coupled with the exact closed-form **Bures-Wasserstein optimal transport map**:
-$$A_k = \Sigma_{X,k}^{-1/2} \left(\Sigma_{X,k}^{1/2} \Sigma_{Y,k}^{\text{boosted}} \Sigma_{X,k}^{1/2}\right)^{1/2} \Sigma_{X,k}^{-1/2}$$
-
-It achieves the **Pareto optimum** of zero-shot voice conversion:
-- **Maximum Speaker Similarity** ($0.749$ ECAPA-TDNN) matching kNN-VC.
-- **Flawless Intelligibility** ($0.71\%$ CER) without frame jitter.
-- **Ultra-fast closed-form execution** ($\text{RTF} = 0.037$), requiring zero model training or fine-tuning.
-
----
-
-## 🧪 Analytical Speech Disentanglement (Pure Content)
-
-In addition to voice conversion, the framework provides an exact mathematical solution to decouple **linguistic content** from **speaker timbre**:
-$$z_{\text{content}}(t) = \sum_k w_{t,k} \left[ c_k + (x_t - \mu_{X,k}) A_{\text{pure},k} \right]$$
-where speech is projected onto a **40-speaker gender-balanced universal background** (20 Males / 20 Females, 50/50 parity).
-
-Regardless of whether the input speaker is male or female, all voices collapse into the exact same **gender-neutral canonical voice (~160 Hz)** with **0.00% CER**, achieving true speaker anonymization and timbre neutralization.
-
----
-
 ## 📦 Installation
 
 ### From GitHub
 ```bash
-git clone https://github.com/<your-username>/boosted-lwt.git
-cd boosted-lwt
+git clone https://github.com/samsad35/lwt-zcvc-code.git
+cd lwt-zcvc-code
 pip install -e .
 ```
 
