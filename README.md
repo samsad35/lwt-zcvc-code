@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/Status-Under%20Review-orange.svg)]()
 
-[**[🎧 Audio Demonstration Website]**](https://<your-username>.github.io/boosted-lwt-demo/) &bull; [**[📄 Paper]**](#citation) &bull; [**[🚀 Quickstart]**](#-quickstart)
+[**[🎧 Audio Demonstration Website]**](https://samsad35.github.io/ZC-VC-demo/) &bull; [**[📄 Paper]**](#citation) &bull; [**[🚀 Quickstart]**](#-quickstart)
 
 </div>
 
