@@ -1,0 +1,221 @@
+import torch
+import numpy as np
+import pandas as pd
+from pathlib import Path
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import StandardScaler
+import warnings
+import sys
+import ppgs
+
+# Ajouter src/ au PYTHONPATH pour pouvoir importer 'une'
+sys.path.append(str(Path(__file__).parent.parent))
+
+from une import LibriSpeech
+from une import WavLM
+
+def get_speaker_id(path_str):
+    return Path(path_str).parts[-3]
+
+def extract_features_all(wavlm_target, wavlm_source, audio_paths, l_target, l_source, desc_msg, gpu=0):
+    latents_target = []
+    latents_source = []
+    labels_ppg = []
+    speaker_ids = []
+    
+    with torch.no_grad():
+        for path in tqdm(audio_paths, desc=desc_msg):
+            h_t = wavlm_target(str(path))[l_target].squeeze(0).cpu().numpy()
+            h_s = wavlm_source(str(path))[l_source].squeeze(0).cpu().numpy()
+            
+            # Extract PPGs
+            audio = ppgs.load.audio(str(path))
+            p = ppgs.from_audio(audio, ppgs.SAMPLE_RATE, gpu=gpu).squeeze(0) # Shape: (40, T_ppg)
+            
+            # Downsample PPGs (100 Hz -> 50 Hz)
+            p = p[:, ::2]
+            p_class = torch.argmax(p, dim=0).cpu().numpy()
+            
+            # Align everything
+            min_T = min(h_t.shape[0], h_s.shape[0], p_class.shape[0])
+            
+            latents_target.append(h_t[:min_T])
+            latents_source.append(h_s[:min_T])
+            labels_ppg.append(p_class[:min_T])
+            speaker_ids.append(get_speaker_id(path))
+            
+    return latents_target, latents_source, labels_ppg, speaker_ids
+
+def learn_cca_mapping(X_list, Y_list, device, dim=64):
+    X_frames = np.concatenate(X_list, axis=0)
+    Y_frames = np.concatenate(Y_list, axis=0)
+    
+    X_mean = np.mean(X_frames, axis=0)
+    Y_mean = np.mean(Y_frames, axis=0)
+    
+    Xt = torch.tensor(X_frames - X_mean, dtype=torch.float32, device=device)
+    Yt = torch.tensor(Y_frames - Y_mean, dtype=torch.float32, device=device)
+    
+    Q_x, R_x = torch.linalg.qr(Xt)
+    Q_y, R_y = torch.linalg.qr(Yt)
+    
+    C = torch.matmul(Q_x.T, Q_y)
+    U, S, Vh = torch.linalg.svd(C)
+    
+    Wx = torch.linalg.solve(R_x, U)
+    Wy = torch.linalg.solve(R_y, Vh.T)
+    
+    Wy_sub = Wy[:, :dim]
+    
+    C_y_train = torch.matmul(Yt, Wy_sub)
+    M = torch.linalg.lstsq(C_y_train, Xt).solution
+    
+    return X_mean, Y_mean, Wy_sub, M
+
+def project_list(Y_list, X_mean, Y_mean, Wy_sub, M, device):
+    X_recon_list = []
+    for Y_utt in Y_list:
+        Y_c = torch.tensor(Y_utt - Y_mean, dtype=torch.float32, device=device)
+        C_y = torch.matmul(Y_c, Wy_sub)
+        X_pred_c = torch.matmul(C_y, M)
+        X_recon_list.append(X_pred_c.cpu().numpy() + X_mean)
+    return X_recon_list
+
+def prepare_probing_data(X_list, labels_ppg_list, speaker_ids_list):
+    # For Speaker: Mean Pooling
+    X_spk = np.array([np.mean(x, axis=0) for x in X_list])
+    y_spk = np.array(speaker_ids_list)
+    
+    # For PPG: Sample 100 frames per utterance
+    X_ppg_frames = []
+    y_ppg_frames = []
+    np.random.seed(42)
+    for x, p_class in zip(X_list, labels_ppg_list):
+        T = x.shape[0]
+        if T > 100:
+            idx = np.random.choice(T, size=100, replace=False)
+        else:
+            idx = np.arange(T)
+        X_ppg_frames.append(x[idx])
+        y_ppg_frames.append(p_class[idx])
+        
+    X_ppg = np.concatenate(X_ppg_frames, axis=0)
+    y_ppg = np.concatenate(y_ppg_frames, axis=0)
+    
+    return X_spk, y_spk, X_ppg, y_ppg
+
+def probe(X_tr, y_tr, X_te, y_te, max_iter=1000):
+    scaler = StandardScaler().fit(X_tr)
+    clf = LogisticRegression(max_iter=max_iter, random_state=42, n_jobs=-1).fit(scaler.transform(X_tr), y_tr)
+    acc = accuracy_score(y_te, clf.predict(scaler.transform(X_te)))
+    return acc
+
+def main():
+    warnings.filterwarnings("ignore")
+    dataset_path = "/scratch2/pictor/ssadok/dataset/audio/LibriSpeech/test-clean"
+    output_dir = Path("output")
+    output_dir.mkdir(exist_ok=True)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    print("1. Préparation des données...")
+    librispeech = LibriSpeech(root=Path(dataset_path), ext="flac")
+    librispeech.generate_table()
+    df_all = librispeech.table
+    
+    df_cca = df_all.sample(n=50, random_state=42) # reduced to 50 for speed
+    df_remaining = df_all.drop(df_cca.index)
+    
+    df_probe_train = df_remaining.sample(n=200, random_state=42)
+    df_probe_test = df_remaining.drop(df_probe_train.index).sample(n=100, random_state=42)
+    
+    print("\n2. Chargement des modèles...")
+    wavlm_base = WavLM(model_name="microsoft/wavlm-base", device=device)
+    wavlm_asr = WavLM(model_name="patrickvonplaten/wavlm-libri-clean-100h-base-plus", device=device)
+    L_TARGET = 8   
+    L_SOURCE = 12  
+    gpu_id = 0 if device == "cuda" else None
+    
+    print("\n3. Extraction et Alignement...")
+    X_cca, Y_cca, _, _ = extract_features_all(wavlm_base, wavlm_asr, df_cca['path'].tolist(), L_TARGET, L_SOURCE, "CCA Data", gpu=gpu_id)
+    X_train_raw, Y_train, ppg_train, spk_train = extract_features_all(wavlm_base, wavlm_asr, df_probe_train['path'].tolist(), L_TARGET, L_SOURCE, "Train Data", gpu=gpu_id)
+    X_test_raw, Y_test, ppg_test, spk_test = extract_features_all(wavlm_base, wavlm_asr, df_probe_test['path'].tolist(), L_TARGET, L_SOURCE, "Test Data", gpu=gpu_id)
+    
+    del wavlm_base, wavlm_asr
+    torch.cuda.empty_cache()
+    
+    print("\n4. Calcul de la CCA (Base = Contenu CCA + Résidu)...")
+    DIM = 64
+    xM, yM, Wy, M = learn_cca_mapping(X_cca, Y_cca, device, dim=DIM)
+    
+    # X_recon = Contenu (Projected from ASR)
+    X_train_recon = project_list(Y_train, xM, yM, Wy, M, device)
+    X_test_recon = project_list(Y_test, xM, yM, Wy, M, device)
+    
+    # X_res = Résidu = X_raw - X_recon
+    X_train_res = [raw - recon for raw, recon in zip(X_train_raw, X_train_recon)]
+    X_test_res = [raw - recon for raw, recon in zip(X_test_raw, X_test_recon)]
+    
+    print("\n5. Préparation des datasets pour les classifieurs...")
+    spk_X_tr_raw, spk_y_tr, ppg_X_tr_raw, ppg_y_tr = prepare_probing_data(X_train_raw, ppg_train, spk_train)
+    spk_X_te_raw, spk_y_te, ppg_X_te_raw, ppg_y_te = prepare_probing_data(X_test_raw, ppg_test, spk_test)
+    
+    spk_X_tr_recon, _, ppg_X_tr_recon, _ = prepare_probing_data(X_train_recon, ppg_train, spk_train)
+    spk_X_te_recon, _, ppg_X_te_recon, _ = prepare_probing_data(X_test_recon, ppg_test, spk_test)
+    
+    spk_X_tr_res, _, ppg_X_tr_res, _ = prepare_probing_data(X_train_res, ppg_train, spk_train)
+    spk_X_te_res, _, ppg_X_te_res, _ = prepare_probing_data(X_test_res, ppg_test, spk_test)
+    
+    print("\n6. Entraînement des Sondes...")
+    print("--- SPEAKER ID (Utterance-level) ---")
+    acc_spk_raw = probe(spk_X_tr_raw, spk_y_tr, spk_X_te_raw, spk_y_te)
+    print(f"Brut: {acc_spk_raw*100:.2f}%")
+    acc_spk_recon = probe(spk_X_tr_recon, spk_y_tr, spk_X_te_recon, spk_y_te)
+    print(f"Contenu (CCA): {acc_spk_recon*100:.2f}%")
+    acc_spk_res = probe(spk_X_tr_res, spk_y_tr, spk_X_te_res, spk_y_te)
+    print(f"Résidu (Brut - Contenu): {acc_spk_res*100:.2f}%")
+    
+    print("\n--- PHONETIQUE PPG (Frame-level) ---")
+    acc_ppg_raw = probe(ppg_X_tr_raw, ppg_y_tr, ppg_X_te_raw, ppg_y_te)
+    print(f"Brut: {acc_ppg_raw*100:.2f}%")
+    acc_ppg_recon = probe(ppg_X_tr_recon, ppg_y_tr, ppg_X_te_recon, ppg_y_te)
+    print(f"Contenu (CCA): {acc_ppg_recon*100:.2f}%")
+    acc_ppg_res = probe(ppg_X_tr_res, ppg_y_tr, ppg_X_te_res, ppg_y_te)
+    print(f"Résidu (Brut - Contenu): {acc_ppg_res*100:.2f}%")
+    
+    print("\n7. Génération du graphique récapitulatif...")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    sns.set_theme(style="whitegrid")
+    
+    labels = ['WavLM Brut', 'Composante\nContenu (CCA)', 'Composante\nRésidu']
+    
+    # Plot Speaker
+    spk_accs = [acc_spk_raw*100, acc_spk_recon*100, acc_spk_res*100]
+    bars1 = sns.barplot(x=labels, y=spk_accs, palette=["#95a5a6", "#3498db", "#e74c3c"], ax=axes[0])
+    axes[0].set_title("Identité du Locuteur (Speaker ID)", fontweight='bold')
+    axes[0].set_ylim(0, 105)
+    for i, bar in enumerate(bars1.patches):
+        axes[0].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                f"{spk_accs[i]:.1f}%", ha='center', va='bottom', fontweight='bold')
+                
+    # Plot PPG
+    ppg_accs = [acc_ppg_raw*100, acc_ppg_recon*100, acc_ppg_res*100]
+    bars2 = sns.barplot(x=labels, y=ppg_accs, palette=["#95a5a6", "#3498db", "#e74c3c"], ax=axes[1])
+    axes[1].set_title("Contenu Phonétique (PPG)", fontweight='bold')
+    axes[1].set_ylim(0, 105)
+    for i, bar in enumerate(bars2.patches):
+        axes[1].text(bar.get_x() + bar.get_width()/2., bar.get_height() + 2,
+                f"{ppg_accs[i]:.1f}%", ha='center', va='bottom', fontweight='bold')
+                
+    plt.suptitle("Factorisation Linéaire : WavLM Brut = Contenu (CCA) + Résidu\n(Base L8 et ASR L12, Goulot 64d)", 
+                 fontsize=16, fontweight='bold', y=1.05)
+    
+    out_file = output_dir / "factorization_results.png"
+    plt.savefig(out_file, dpi=300, bbox_inches='tight')
+    print(f"🎉 Graphique sauvegardé dans : {out_file}")
+
+if __name__ == "__main__":
+    main()

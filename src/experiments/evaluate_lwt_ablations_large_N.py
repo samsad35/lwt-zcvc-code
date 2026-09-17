@@ -1,0 +1,364 @@
+import os, sys, time, torch, torchaudio
+import numpy as np
+import pandas as pd
+from pathlib import Path
+from sklearn.cluster import KMeans
+import jiwer
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
+from speechbrain.inference.speaker import EncoderClassifier
+import torchaudio.functional as F
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from src.core.models import get_wct, compute_trajectory_jitter
+
+device = 'cuda:0'
+
+print("================================================================================")
+print("=== LAUNCHING COMPREHENSIVE LWT ABLATIONS WITH LARGE N (SMOOTH DYNAMICS) ===")
+print("================================================================================")
+
+# 1. Load Pretrained Models
+wavlm = torch.hub.load('bshall/knn-vc', 'wavlm_large', trust_repo=True, device=device).eval()
+hifigan, _ = torch.hub.load('bshall/knn-vc', 'hifigan_wavlm', trust_repo=True, prematched=True, device=device)
+hifigan.eval()
+
+processor = Wav2Vec2Processor.from_pretrained('facebook/wav2vec2-base-960h')
+asr = Wav2Vec2ForCTC.from_pretrained('facebook/wav2vec2-base-960h').to(device).eval()
+spk_model = EncoderClassifier.from_hparams(
+    source='speechbrain/spkrec-ecapa-voxceleb', 
+    run_opts={'device': 'cuda:0'}, 
+    savedir='/tmp/speechbrain'
+)
+
+def ext(p):
+    w, sr = torchaudio.load(str(p))
+    w = w.to(device)
+    if sr != 16000: w = F.resample(w, sr, 16000)
+    if w.dim() == 1: w = w.unsqueeze(0)
+    with torch.no_grad(): feat, _ = wavlm.extract_features(w, output_layer=6)
+    return feat.squeeze(0).cpu().numpy(), w.squeeze().cpu()
+
+def voc(f):
+    with torch.inference_mode():
+        if isinstance(f, np.ndarray): f = torch.tensor(f, dtype=torch.float32, device=device)
+        return hifigan(f.unsqueeze(0)).squeeze(0).cpu()
+
+def tr(w):
+    inp = processor(w.squeeze().numpy(), sampling_rate=16000, return_tensors='pt', padding=True).to(device)
+    with torch.no_grad(): log = asr(inp.input_values).logits
+    pred_ids = torch.argmax(log, dim=-1)
+    return processor.batch_decode(pred_ids)[0].strip()
+
+def emb(w):
+    with torch.no_grad():
+        return torch.nn.functional.normalize(
+            spk_model.encode_batch(w.squeeze().float().unsqueeze(0).to(device)).squeeze().cpu(), 
+            dim=0
+        )
+
+def project_psd(M, eps=1e-3):
+    evals, evecs = torch.linalg.eigh(M)
+    evals = torch.clamp(evals, min=eps)
+    return evecs @ torch.diag(evals) @ evecs.t()
+
+def compute_bures_map_torch(cov_X, cov_Y, eps=1e-2):
+    D = cov_X.shape[0]
+    I_D = torch.eye(D, device=cov_X.device, dtype=cov_X.dtype)
+    cX = cov_X + eps * I_D
+    cY = cov_Y + eps * I_D
+    
+    evals_X, evecs_X = torch.linalg.eigh(cX)
+    evals_X = evals_X.clamp(min=eps)
+    cX_half = evecs_X @ torch.diag(torch.sqrt(evals_X)) @ evecs_X.t()
+    cX_inv_half = evecs_X @ torch.diag(1.0 / torch.sqrt(evals_X)) @ evecs_X.t()
+    
+    M = cX_half @ cY @ cX_half
+    evals_M, evecs_M = torch.linalg.eigh(M)
+    evals_M = evals_M.clamp(min=eps**2)
+    M_half = evecs_M @ torch.diag(torch.sqrt(evals_M)) @ evecs_M.t()
+    
+    A = cX_inv_half @ M_half @ cX_inv_half
+    return A
+
+root = Path('/scratch2/pictor/ssadok/dataset/audio/LibriSpeech/test-clean')
+
+# 5 Balanced Target Speakers (Female: 121, 1089, Male: 237, 260, 1188)
+target_speakers = ['121', '1089', '237', '260', '1188']
+
+# 20 Disjoint Source Sentences from 10 distinct speakers
+src_spks = ['1284', '1320', '1580', '1995', '2094', '2300', '2830', '2961', '3575', '4077']
+src_files = []
+for s in src_spks:
+    f_list = sorted(list((root / s).rglob('*.flac')))
+    if len(f_list) >= 2:
+        src_files.extend(f_list[:2])
+    else:
+        src_files.extend(f_list)
+src_files = src_files[:20]
+
+# Total evaluations per test point = 5 targets x 20 sources = 100 conversions!
+print(f"Loaded {len(target_speakers)} target speakers and {len(src_files)} source utterances.")
+print(f"Total evaluated conversions per condition = {len(target_speakers)} x {len(src_files)} = 100 conversions (Large N).")
+
+print("Pre-extracting source features and references...")
+src_data = []
+for p in src_files:
+    feat, wav = ext(p)
+    ref = tr(wav)
+    src_data.append({
+        'path': p,
+        'spk': p.parent.parent.name,
+        'feat': feat,
+        'ref': ref,
+        'duration': len(feat) * 0.02
+    })
+
+# Precompute Population Shared Phonetic Covariance for K=10, K=20, etc.
+bg_spks = ['4970', '4992', '5142', '5639', '5683', '61']
+bg_feats = []
+for b_spk in bg_spks:
+    b_files = sorted(list((root / b_spk).rglob('*.flac')))[:6]
+    for bf in b_files:
+        x, _ = ext(bf)
+        bg_feats.append(x)
+bg_Y = np.concatenate(bg_feats, axis=0)
+
+# Pre-load full target speech pools
+target_pools = {}
+for spk in target_speakers:
+    files = sorted(list((root / spk).rglob('*.flac')))[:25]
+    X_list, wavs = [], []
+    for p in files:
+        x, w = ext(p); X_list.append(x); wavs.append(w)
+    Y = np.concatenate(X_list, axis=0)
+    prof = torch.stack([emb(w) for w in wavs[:10]]).mean(dim=0)
+    prof = torch.nn.functional.normalize(prof, dim=0)
+    target_pools[spk] = {
+        'files': files,
+        'Y_full': Y,
+        'prof': prof,
+        'wavs': wavs
+    }
+
+# Helper function to run LWT conversion on src_data given target models
+def eval_lwt_condition(cents_norm, cl_mu_Y, cl_cov_Y, beta=20.0):
+    cers, sims, jitters = [], [], []
+    for tgt_spk in target_speakers:
+        prof = target_pools[tgt_spk]['prof']
+        mu_k_list = cl_mu_Y[tgt_spk]
+        cov_k_list = cl_cov_Y[tgt_spk]
+        K = len(mu_k_list)
+        
+        for s in src_data:
+            xs = s['feat']
+            ref = s['ref']
+            xs_t = torch.tensor(xs, dtype=torch.float32, device=device)
+            xs_n = torch.nn.functional.normalize(xs_t, dim=1)
+            
+            sim_mat = xs_n @ cents_norm[tgt_spk].t()
+            w_dyn = torch.softmax(sim_mat * beta, dim=1)
+            
+            x_hat = torch.zeros_like(xs_t)
+            for k in range(K):
+                wk = w_dyn[:, k:k+1]
+                mass_k = wk.sum()
+                if mass_k < 1e-4: continue
+                mu_X_k = (xs_t * wk).sum(dim=0) / mass_k
+                xc = xs_t - mu_X_k.unsqueeze(0)
+                cov_X_k = torch.mm(xc.t(), xc * wk) / mass_k
+                A_k = compute_bures_map_torch(cov_X_k, cov_k_list[k], eps=1e-2)
+                T_k = torch.mm(xc, A_k) + mu_k_list[k].unsqueeze(0)
+                x_hat += wk * T_k
+                
+            x_np = x_hat.cpu().numpy()
+            _, rjit = compute_trajectory_jitter(x_np, xs)
+            wc = voc(x_np)
+            hyp = tr(wc)
+            cer = jiwer.cer(ref, hyp) * 100.0
+            sim = torch.dot(prof, emb(wc)).item()
+            
+            cers.append(cer)
+            sims.append(sim)
+            jitters.append(rjit)
+            
+    return float(np.mean(cers)), float(np.mean(sims)), float(np.mean(jitters))
+
+# ==============================================================================
+# EXPERIMENT 1: BETA ABLATION ON LWT (Large N=100)
+# ==============================================================================
+print("\n--- Running Beta Ablation on LWT (K=10, T=20, N=100 conversions per beta) ---")
+# Setup K=10 clusters for each target speaker
+K_fixed = 10
+cents_beta = {}
+mu_Y_beta = {}
+cov_Y_beta = {}
+for spk in target_speakers:
+    Y = target_pools[spk]['Y_full'][:4000] # ~80s budget
+    km = KMeans(n_clusters=K_fixed, random_state=42, n_init=1).fit(Y)
+    cents_t = torch.tensor(km.cluster_centers_, dtype=torch.float32, device=device)
+    cents_beta[spk] = torch.nn.functional.normalize(cents_t, dim=1)
+    
+    m_list, c_list = [], []
+    for k in range(K_fixed):
+        Yk = Y[km.labels_ == k]
+        muk = np.mean(Yk, axis=0)
+        covk = np.cov(Yk - muk, rowvar=False) if len(Yk) > 1 else np.zeros((1024, 1024))
+        m_list.append(torch.tensor(muk, dtype=torch.float32, device=device))
+        c_list.append(torch.tensor(covk, dtype=torch.float32, device=device))
+    mu_Y_beta[spk] = m_list
+    cov_Y_beta[spk] = c_list
+
+betas = [2.0, 5.0, 10.0, 20.0, 50.0, 100.0]
+records_beta = []
+for b in betas:
+    t0 = time.time()
+    cer, sim, jit = eval_lwt_condition(cents_beta, mu_Y_beta, cov_Y_beta, beta=b)
+    records_beta.append({'Beta': b, 'CER': cer, 'Sim': sim, 'Jitter': jit})
+    print(f"  Beta = {b:5.1f} | CER: {cer:5.2f}% | Sim: {sim:.4f} | Jitter: {jit:.3f} | ({time.time()-t0:.1f}s)")
+
+pd.DataFrame(records_beta).to_csv('/local_scratch/ssadok/un_projet_audio/output/tables/lwt_ablation_beta_large_N.csv', index=False)
+
+# ==============================================================================
+# EXPERIMENT 2: K ABLATION ON LWT (Large N=100)
+# ==============================================================================
+print("\n--- Running K Ablation on LWT (Beta=20, T=20, N=100 conversions per K) ---")
+k_values = [1, 3, 8, 15, 25, 50]
+records_k = []
+for k_val in k_values:
+    t0 = time.time()
+    cents_k = {}
+    mu_Y_k = {}
+    cov_Y_k = {}
+    for spk in target_speakers:
+        Y = target_pools[spk]['Y_full'][:4000]
+        if k_val == 1:
+            muk = np.mean(Y, axis=0)
+            covk = np.cov(Y - muk, rowvar=False)
+            cents_k[spk] = torch.tensor(muk, dtype=torch.float32, device=device).unsqueeze(0)
+            cents_k[spk] = torch.nn.functional.normalize(cents_k[spk], dim=1)
+            mu_Y_k[spk] = [torch.tensor(muk, dtype=torch.float32, device=device)]
+            cov_Y_k[spk] = [torch.tensor(covk, dtype=torch.float32, device=device)]
+        else:
+            km = KMeans(n_clusters=k_val, random_state=42, n_init=1).fit(Y)
+            cents_t = torch.tensor(km.cluster_centers_, dtype=torch.float32, device=device)
+            cents_k[spk] = torch.nn.functional.normalize(cents_t, dim=1)
+            m_list, c_list = [], []
+            for ki in range(k_val):
+                Yk = Y[km.labels_ == ki]
+                muk = np.mean(Yk, axis=0)
+                covk = np.cov(Yk - muk, rowvar=False) if len(Yk) > 1 else np.zeros((1024, 1024))
+                m_list.append(torch.tensor(muk, dtype=torch.float32, device=device))
+                c_list.append(torch.tensor(covk, dtype=torch.float32, device=device))
+            mu_Y_k[spk] = m_list
+            cov_Y_k[spk] = c_list
+            
+    cer, sim, jit = eval_lwt_condition(cents_k, mu_Y_k, cov_Y_k, beta=20.0)
+    records_k.append({'K': k_val, 'CER': cer, 'Sim': sim, 'Jitter': jit})
+    print(f"  K = {k_val:3d} | CER: {cer:5.2f}% | Sim: {sim:.4f} | Jitter: {jit:.3f} | ({time.time()-t0:.1f}s)")
+
+pd.DataFrame(records_k).to_csv('/local_scratch/ssadok/un_projet_audio/output/tables/lwt_ablation_K_large_N.csv', index=False)
+
+# ==============================================================================
+# EXPERIMENT 3: TARGET BUDGET T ABLATION ON LWT (Large N=100)
+# ==============================================================================
+print("\n--- Running Target Budget T Ablation on LWT (K=10, Beta=20, N=100 conversions per T) ---")
+# Durations: ~2s (100 frames), ~5s (250 frames), ~10s (500 frames), ~20s (1000 frames), ~40s (2000 frames), ~80s (4000 frames)
+dur_configs = [
+    (100, 2.0),
+    (250, 5.0),
+    (500, 10.0),
+    (1000, 20.0),
+    (2000, 40.0),
+    (4000, 80.0)
+]
+records_t = []
+for n_frames, sec in dur_configs:
+    t0 = time.time()
+    cents_t = {}
+    mu_Y_t = {}
+    cov_Y_t = {}
+    for spk in target_speakers:
+        Y = target_pools[spk]['Y_full'][:n_frames]
+        km = KMeans(n_clusters=K_fixed, random_state=42, n_init=1).fit(Y)
+        cents_raw = torch.tensor(km.cluster_centers_, dtype=torch.float32, device=device)
+        cents_t[spk] = torch.nn.functional.normalize(cents_raw, dim=1)
+        m_list, c_list = [], []
+        for k in range(K_fixed):
+            Yk = Y[km.labels_ == k]
+            muk = np.mean(Yk, axis=0) if len(Yk) > 0 else km.cluster_centers_[k]
+            covk = np.cov(Yk - muk, rowvar=False) if len(Yk) > 1 else np.zeros((1024, 1024))
+            m_list.append(torch.tensor(muk, dtype=torch.float32, device=device))
+            c_list.append(torch.tensor(covk, dtype=torch.float32, device=device))
+        mu_Y_t[spk] = m_list
+        cov_Y_t[spk] = c_list
+        
+    cer, sim, jit = eval_lwt_condition(cents_t, mu_Y_t, cov_Y_t, beta=20.0)
+    records_t.append({'Frames': n_frames, 'Duration_sec': sec, 'CER': cer, 'Sim': sim, 'Jitter': jit})
+    print(f"  T = {sec:4.1f}s ({n_frames:4d} frames) | CER: {cer:5.2f}% | Sim: {sim:.4f} | Jitter: {jit:.3f} | ({time.time()-t0:.1f}s)")
+
+pd.DataFrame(records_t).to_csv('/local_scratch/ssadok/un_projet_audio/output/tables/lwt_ablation_T_large_N.csv', index=False)
+
+# ==============================================================================
+# EXPERIMENT 4: ALPHA SPEAKER COVARIANCE BOOST ON LWT (Large N=100)
+# ==============================================================================
+print("\n--- Running Alpha Speaker Boost Ablation on LWT (K=10, Beta=20, T=20, N=100 conversions per alpha) ---")
+# Build Population Shared for K=10
+km_shared = KMeans(n_clusters=K_fixed, random_state=42, n_init=1).fit(bg_Y)
+cents_sh = torch.tensor(km_shared.cluster_centers_, dtype=torch.float32, device=device)
+cents_sh_norm = torch.nn.functional.normalize(cents_sh, dim=1)
+
+cov_shared_k = []
+for k in range(K_fixed):
+    idx_k = np.where(km_shared.labels_ == k)[0]
+    Yk = bg_Y[idx_k]
+    muk = np.mean(Yk, axis=0)
+    covk = np.cov(Yk - muk, rowvar=False) if len(Yk) > 1 else np.zeros((1024, 1024))
+    cov_shared_k.append(torch.tensor(covk, dtype=torch.float32, device=device))
+
+# Precompute target representation on shared clusters
+cl_mu_shared = {}
+cl_cov_shared = {}
+delta_cov = {}
+cents_sh_dict = {}
+
+for spk in target_speakers:
+    cents_sh_dict[spk] = cents_sh_norm
+    Y = target_pools[spk]['Y_full'][:4000]
+    Y_t = torch.tensor(Y, dtype=torch.float32, device=device)
+    Y_n = torch.nn.functional.normalize(Y_t, dim=1)
+    sim_Y = Y_n @ cents_sh_norm.t()
+    w_Y = torch.softmax(sim_Y * 20.0, dim=1)
+    
+    m_list, c_list, d_list = [], [], []
+    for k in range(K_fixed):
+        wk = w_Y[:, k:k+1]
+        mass_k = wk.sum()
+        muk = (Y_t * wk).sum(dim=0) / (mass_k + 1e-8)
+        yc = Y_t - muk.unsqueeze(0)
+        cov_Y_k = torch.mm(yc.t(), yc * wk) / (mass_k + 1e-8)
+        m_list.append(muk)
+        c_list.append(cov_Y_k)
+        d_list.append(cov_Y_k - cov_shared_k[k])
+    cl_mu_shared[spk] = m_list
+    cl_cov_shared[spk] = c_list
+    delta_cov[spk] = d_list
+
+alphas = [0.5, 0.8, 1.0, 1.2, 1.5, 1.8, 2.0]
+records_alpha = []
+for a in alphas:
+    t0 = time.time()
+    boosted_cov = {}
+    for spk in target_speakers:
+        b_list = []
+        for k in range(K_fixed):
+            cov_b = cov_shared_k[k] + a * delta_cov[spk][k]
+            cov_b = project_psd(cov_b, eps=1e-3)
+            b_list.append(cov_b)
+        boosted_cov[spk] = b_list
+        
+    cer, sim, jit = eval_lwt_condition(cents_sh_dict, cl_mu_shared, boosted_cov, beta=20.0)
+    records_alpha.append({'Alpha': a, 'CER': cer, 'Sim': sim, 'Jitter': jit})
+    print(f"  Alpha = {a:4.1f} | CER: {cer:5.2f}% | Sim: {sim:.4f} | Jitter: {jit:.3f} | ({time.time()-t0:.1f}s)")
+
+pd.DataFrame(records_alpha).to_csv('/local_scratch/ssadok/un_projet_audio/output/tables/lwt_ablation_alpha_large_N.csv', index=False)
+print("\n[DONE] All LWT large-N ablations completed successfully!")

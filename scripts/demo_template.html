@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boosted Local Wasserstein Transport | ICASSP 2026 Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --card-border: #e2e8f0;
+            --card-border-hover: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --text-secondary: #334155;
+            --primary: #0284c7;
+            --primary-light: #f0f9ff;
+            --gold: #d97706;
+            --gold-light: #fffbeb;
+            --gold-border: #fde68a;
+            --tag-bg: #f1f5f9;
+            --tag-text: #475569;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Hero Banner - Clean White / Minimalist */
+        .hero {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--card-border);
+            padding: 3.5rem 1.5rem 2.75rem;
+            text-align: center;
+        }
+
+        .conference-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--primary-light);
+            color: var(--primary);
+            border: 1px solid #bae6fd;
+            padding: 0.3rem 0.85rem;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 1.25rem;
+        }
+
+        h1 {
+            font-size: 2.35rem;
+            font-weight: 800;
+            color: var(--text-main);
+            margin: 0 0 0.85rem;
+            letter-spacing: -0.025em;
+        }
+
+        .hero p.subtitle {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            max-width: 820px;
+            margin: 0 auto 1.75rem;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        .nav-pills {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: var(--surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--card-border);
+            padding: 0.45rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.15s ease-in-out;
+        }
+
+        .nav-pill:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1140px;
+            margin: 0 auto;
+            padding: 2.5rem 1.25rem 4rem;
+        }
+
+        /* Section Headers */
+        .section-header {
+            margin: 3.25rem 0 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .section-header h2 {
+            font-size: 1.55rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0;
+            letter-spacing: -0.015em;
+        }
+
+        .section-desc {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.35rem;
+        }
+
+        /* Formulation box */
+        .method-box {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem 1.75rem;
+            margin-bottom: 2.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+
+        .method-box h3 {
+            margin: 0 0 0.6rem;
+            font-size: 1.1rem;
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .method-box p {
+            margin: 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+        }
+
+        .method-box code {
+            background: #f1f5f9;
+            color: #0f172a;
+            padding: 0.2rem 0.45rem;
+            border-radius: 5px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.84rem;
+            border: 1px solid #e2e8f0;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .card:hover {
+            border-color: var(--card-border-hover);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.1rem;
+            padding-bottom: 0.85rem;
+            border-bottom: 1px solid var(--card-border);
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+
+        .header-title-group {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .pair-badge {
+            background: #f1f5f9;
+            color: var(--text-secondary);
+            border: 1px solid var(--card-border);
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.2rem 0.55rem;
+            border-radius: 6px;
+            text-transform: uppercase;
+        }
+
+        .card-header h2, .card-header h3 {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .badge-row {
+            display: flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            border: 1px solid var(--card-border);
+            background: var(--tag-bg);
+            color: var(--tag-text);
+        }
+
+        .badge.cat-badge, .badge.cat {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-color: #bfdbfe;
+        }
+
+        .badge.spk-badge {
+            background: #f8fafc;
+            color: #334155;
+            border-color: #cbd5e1;
+        }
+
+        .transcript {
+            background: #f8fafc;
+            border-left: 3px solid var(--primary);
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.25rem;
+            font-style: italic;
+        }
+
+        /* Audio Grid */
+        .audio-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+
+        .ref-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        @media (max-width: 768px) {
+            .ref-row { grid-template-columns: 1fr; }
+            .audio-grid { grid-template-columns: 1fr; }
+        }
+
+        .audio-box {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            transition: all 0.15s ease;
+        }
+
+        .audio-box:hover {
+            border-color: #cbd5e1;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+        }
+
+        .audio-box.ref-box {
+            background: #f8fafc;
+            border-left: 3px solid #64748b;
+        }
+
+        .audio-box.highlight-box {
+            background: #fffdf7;
+            border: 1.5px solid var(--gold);
+            box-shadow: 0 2px 8px rgba(217, 119, 6, 0.07);
+        }
+
+        .label, .audio-label {
+            font-weight: 700;
+            font-size: 0.88rem;
+            color: var(--text-main);
+            margin-bottom: 0.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .label.gold, .audio-label.gold {
+            color: #b45309;
+        }
+
+        .sublabel, .audio-sublabel {
+            font-size: 0.76rem;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+            min-height: 1.15rem;
+        }
+
+        audio {
+            width: 100%;
+            height: 36px;
+            border-radius: 6px;
+            outline: none;
+        }
+
+        /* Alpha Ablation Section */
+        .alpha-interactive-container, .alpha-section-box {
+            background: #f8fafc;
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin-top: 1rem;
+        }
+
+        .alpha-selector-header, .alpha-header {
+            margin-bottom: 0.85rem;
+        }
+
+        .alpha-selector-header h4, .alpha-header h4 {
+            margin: 0 0 0.25rem;
+            font-size: 0.98rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .alpha-hint {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+
+        .alpha-btn-group {
+            display: flex;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.15rem;
+        }
+
+        .alpha-btn {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            color: var(--text-secondary);
+            padding: 0.5rem 0.85rem;
+            border-radius: 8px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .alpha-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .alpha-btn.active {
+            background: var(--text-main);
+            color: #ffffff;
+            border-color: var(--text-main);
+            font-weight: 700;
+        }
+
+        .btn-badge {
+            font-size: 0.65rem;
+            background: rgba(0,0,0,0.06);
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        .alpha-btn.active .btn-badge {
+            background: var(--gold);
+            color: #000000;
+        }
+
+        .alpha-player-box {
+            background: var(--surface);
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1.15rem;
+        }
+
+        .alpha-meta {
+            margin-bottom: 0.65rem;
+        }
+
+        .alpha-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .alpha-title em {
+            color: var(--primary);
+            font-style: normal;
+            font-weight: 500;
+        }
+
+        /* Benchmark Table */
+        .table-responsive {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid var(--card-border);
+            margin-bottom: 2rem;
+            background: var(--surface);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        }
+
+        table.benchmark-table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.86rem;
+        }
+
+        table.benchmark-table th {
+            background: #f8fafc;
+            color: var(--text-secondary);
+            padding: 0.85rem 1rem;
+            font-weight: 700;
+            border-bottom: 1px solid var(--card-border);
+            white-space: nowrap;
+        }
+
+        table.benchmark-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #f1f5f9;
+            white-space: nowrap;
+            color: var(--text-secondary);
+        }
+
+        table.benchmark-table tr:hover td {
+            background: #f8fafc;
+        }
+
+        table.benchmark-table tr.highlight-row td {
+            background: #fffdf5;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        table.benchmark-table tr.highlight-row td:first-child {
+            border-left: 3px solid var(--gold);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+            font-size: 0.86rem;
+            border-top: 1px solid var(--card-border);
+            background: var(--surface);
+        }
+    </style>
+</head>
+<body>
+
+    <header class="hero">
+        <div class="conference-badge">ICASSP 2026 &bull; Official Demonstration</div>
+        <h1>Boosted Local Wasserstein Transport</h1>
+        <p class="subtitle">
+            Zero-Shot Voice Conversion via Closed-Form Monge-Kantorovich Optimal Transport and Speaker-Covariance Boosting in Self-Supervised Latent Spaces.
+        </p>
+        <div class="nav-pills">
+            <a href="#ablation" class="nav-pill">&alpha; Ablation Study (0 &rarr; 3)</a>
+            <a href="#benchmark" class="nav-pill">Curated 9-Pair Suite</a>
+            <a href="#table" class="nav-pill">Unified Benchmark Table</a>
+        </div>
+    </header>
+
+    <div class="container">
+
+        <!-- SECTION 1: METHOD FORMULATION -->
+        <div class="method-box">
+            <h3>Method Overview: Speaker-Covariance Monge Transport</h3>
+            <p>
+                Given self-supervised frame representations <code>x &isin; &reals;<sup>1024</sup></code> from layer 6 of <strong>WavLM-Large</strong>, Boosted LWT decomposes speech into <code>K=10</code> soft phonetic clusters and applies the closed-form Bures-Wasserstein optimal transport map:
+            </p>
+            <p>
+                <code>T<sub>k</sub>(x) = &mu;<sub>Y,k</sub> + (x - &mu;<sub>X,k</sub>) A<sub>k</sub>, &nbsp; with &nbsp; A<sub>k</sub> = &Sigma;<sub>X,k</sub><sup>-1/2</sup> (&Sigma;<sub>X,k</sub><sup>1/2</sup> &Sigma;<sub>Y,k</sub><sup>(&alpha;)</sup> &Sigma;<sub>X,k</sub><sup>1/2</sup>)<sup>1/2</sup> &Sigma;<sub>X,k</sub><sup>-1/2</sup></code>
+            </p>
+            <p>
+                The target covariance is boosted via universal background decomposition: 
+                <code>&Sigma;<sub>Y,k</sub><sup>(&alpha;)</sup> = &Sigma;<sub>shared,k</sub> + &alpha; (&Sigma;<sub>Y,k</sub> - &Sigma;<sub>shared,k</sub>)</code>.
+                Setting <strong>&alpha; = 1.5</strong> maximizes target speaker timbre without altering linguistic content (Wav2Vec2 CER = <strong>0.71%</strong>, ECAPA similarity = <strong>0.749</strong>).
+            </p>
+        </div>
+
+        <!-- SECTION 2: ABLATION STUDY -->
+        <div id="ablation" class="section-header">
+            <div>
+                <h2>1. Ablation Study: Impact of Boost Factor &alpha; &isin; [0.0, 3.0]</h2>
+                <div class="section-desc">
+                    Listen to the continuous morphing of speaker identity, vowel formant shift, and stability across 7 values of &alpha; on challenging cross-gender conversions.
+                </div>
+            </div>
+        </div>
+
+        {{ABLATION_CARDS}}
+
+        <!-- SECTION 3: CURATED 9-PAIR BENCHMARK -->
+        <div id="benchmark" class="section-header">
+            <div>
+                <h2>2. Curated Multi-Gender Voice Conversion Suite (9 Diverse Pairs)</h2>
+                <div class="section-desc">
+                    Side-by-side listening comparison across Voice Conversion paradigms on LibriSpeech test-clean: Proposed Boosted LWT, Baseline LWT, LinearVC (Interspeech 2025), kNN-VC, and Classic WCT.
+                </div>
+            </div>
+        </div>
+
+        {{BENCHMARK_CARDS}}
+
+        <!-- SECTION 4: BENCHMARK TABLE -->
+        <div id="table" class="section-header">
+            <div>
+                <h2>3. Quantitative Benchmark Summary (Unified N=200 Conversions)</h2>
+                <div class="section-desc">
+                    Evaluated on 10 source speakers &times; 10 target speakers &times; 20 source utterances from LibriSpeech test-clean.
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="benchmark-table">
+                <thead>
+                    <tr>
+                        <th>Method</th>
+                        <th>Approach Type</th>
+                        <th>CER (w2v2) &darr;</th>
+                        <th>WER (w2v2) &darr;</th>
+                        <th>ECAPA Sim &uarr;</th>
+                        <th>WavLM-SV &uarr;</th>
+                        <th>MOS &uarr;</th>
+                        <th>STOI &uarr;</th>
+                        <th>Rel. Jitter &darr;</th>
+                        <th>RTF &darr;</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="highlight-row">
+                        <td><strong>Boosted LWT (&alpha;=1.5 - Proposed)</strong></td>
+                        <td>Speaker-Covariance Monge OT</td>
+                        <td><strong>0.71%</strong></td>
+                        <td><strong>2.68%</strong></td>
+                        <td><strong>0.7491</strong></td>
+                        <td><strong>0.9666</strong></td>
+                        <td><strong>4.37</strong></td>
+                        <td><strong>0.9919</strong></td>
+                        <td>1.00&times;</td>
+                        <td>0.037</td>
+                    </tr>
+                    <tr>
+                        <td><strong>LWT (&alpha;=1.0 - Baseline)</strong></td>
+                        <td>Piecewise Monge-Kantorovich</td>
+                        <td>0.58%</td>
+                        <td>2.38%</td>
+                        <td>0.7197</td>
+                        <td>0.9659</td>
+                        <td>4.38</td>
+                        <td>0.9925</td>
+                        <td>0.95&times;</td>
+                        <td>0.024</td>
+                    </tr>
+                    <tr>
+                        <td><strong>LinearVC (Official 2025)</strong></td>
+                        <td>Global Linear Projection</td>
+                        <td>0.67%</td>
+                        <td>2.82%</td>
+                        <td>0.7069</td>
+                        <td>0.9365</td>
+                        <td>4.37</td>
+                        <td>0.9931</td>
+                        <td><strong>0.73&times;</strong></td>
+                        <td><strong>0.000019</strong></td>
+                    </tr>
+                    <tr>
+                        <td><strong>kNN-VC (k=4)</strong></td>
+                        <td>Local Nearest Neighbor</td>
+                        <td>1.11%</td>
+                        <td>4.00%</td>
+                        <td>0.7426</td>
+                        <td>0.9721</td>
+                        <td>4.38</td>
+                        <td>0.9943</td>
+                        <td>0.77&times;</td>
+                        <td>0.00015</td>
+                    </tr>
+                    <tr>
+                        <td><strong>kNN-VC (k=1)</strong></td>
+                        <td>1-NN Replacement</td>
+                        <td>1.72%</td>
+                        <td>5.44%</td>
+                        <td>0.7192</td>
+                        <td>0.9720</td>
+                        <td>4.37</td>
+                        <td>0.9931</td>
+                        <td>1.10&times;</td>
+                        <td>0.00009</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Classic WCT</strong></td>
+                        <td>Global Gaussian Matching</td>
+                        <td>1.00%</td>
+                        <td>3.23%</td>
+                        <td>0.6482</td>
+                        <td>0.9584</td>
+                        <td>4.35</td>
+                        <td>0.9906</td>
+                        <td>0.65&times;</td>
+                        <td>0.00086</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div>
+
+    <footer>
+        <p>ICASSP 2026 Submission Demonstration &bull; Boosted Local Wasserstein Transport (Boosted LWT)</p>
+        <p style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.4rem;">Synthesized with WavLM-Large (Layer 6) + HiFi-GAN Vocoder</p>
+    </footer>
+
+    <script>
+        function selectAlpha(cardId, alphaVal, btnElement) {
+            const card = document.getElementById(cardId);
+            if (!card) return;
+            
+            card.querySelectorAll('.alpha-btn').forEach(btn => btn.classList.remove('active'));
+            btnElement.classList.add('active');
+            
+            card.querySelectorAll('.alpha-player').forEach(player => player.style.display = 'none');
+            const targetPlayer = card.querySelector('#player_' + cardId + '_' + String(alphaVal).replace('.', '_'));
+            if (targetPlayer) {
+                targetPlayer.style.display = 'block';
+            }
+        }
+
+        // Single-audio playback coordinator
+        document.addEventListener('play', function(e) {
+            const audios = document.getElementsByTagName('audio');
+            for (let i = 0; i < audios.length; i++) {
+                if (audios[i] !== e.target) {
+                    audios[i].pause();
+                }
+            }
+        }, true);
+    </script>
+</body>
+</html>

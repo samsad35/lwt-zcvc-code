@@ -1,0 +1,58 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+src/*.egg-info/
+.installed.cfg
+*.egg
+
+# External heavy baselines (cloned repos & large checkpoints)
+src/baselines/
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data & heavy outputs
+data/
+output/
+scratch/
+*.log
+*.tar
+*.tar.gz
+*.pdf
+*.csv
+mfa_cache/
+mfa_output/
+mfa_test/
+mfa_tmp/
+
+# OS specific files
+.DS_Store
+Thumbs.db

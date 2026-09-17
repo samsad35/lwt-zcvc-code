@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boosted-lwt"
+version = "0.1.0"
+description = "Local Transport Mixtures for Zero-Shot Voice Conversion in SSL Spaces"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Samir Sadok" },
+    { name = "Xavier Alameda-Pineda" }
+]
+keywords = [
+    "voice-conversion",
+    "optimal-transport",
+    "wasserstein",
+    "speech-disentanglement",
+    "self-supervised-learning",
+    "wavlm"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "torch>=1.12.0",
+    "torchaudio>=0.12.0",
+    "numpy>=1.20.0",
+    "scipy>=1.8.0",
+    "soundfile>=0.12.0",
+    "scikit-learn>=1.0.0",
+    "tqdm>=4.60.0",
+]
+
+[project.scripts]
+boosted-lwt = "boosted_lwt.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["boosted_lwt*"]
+
+[tool.setuptools.package-data]
+boosted_lwt = ["*.pt", "*.json"]
