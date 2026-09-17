@@ -171,7 +171,7 @@ methods_config = [
         'key': 'boosted_lwt',
         'file': 'converted_boosted_lwt.wav',
         'name': 'Proposed LWT (α=1.5)',
-        'badge': 'Proposed Optimum ⭐',
+        'badge': 'Proposed ⭐',
         'highlight': True,
         'color': 'gold',
     },
